@@ -1,0 +1,1130 @@
+# Creating a Stata repository for a local machine - in progress
+
+
+
+# Load in packages
+import os
+import re
+import pandas as pd
+import subprocess
+import time
+import sqlite3
+from datetime import datetime
+import os
+import shutil
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
+import requests
+import yaml
+import js2py
+import julia
+import zipfile
+
+# Functions
+def Get_fileinfo(direct):
+    def Data_builder(files):
+        # Creates a dataframe from all the files, so it can be checked as ados, dos, etc.
+        def Filename_clenser(i):
+            # Takes the filename
+            file_name = i
+            # Looks for the last . in the filename -> after that is the file extension
+            dot_position = file_name.rfind('.')
+
+            # Extracts the extension
+            if dot_position != -1:
+                file_extension = file_name[dot_position+1:]
+                # If the extension is trk or pkg, we do not need data about them
+                if file_extension == 'trk' or file_extension == 'pkg':
+                    return None, None #Return ~Nones
+                # Return the file name and the extension, latter always in lower case
+                return file_name.replace(f".{file_extension}", ''), file_extension.lower()
+            else:
+                # Handle the case where no dot is found in the string
+                print(file_name)
+                return None, None  # Return None
+        df_list = []
+        for i in files:
+            df_list.append(pd.DataFrame([Filename_clenser(i)], columns = ['ADO', 'Type']))
+
+        df=pd.concat(df_list, ignore_index = True)
+        df=df.dropna(how='all')
+        return(df)
+    
+    fl = [item for item in os.listdir(direct) if not re.compile('.trk').search(item) and not re.compile('PDFs').search(item) and not re.compile('Weird_ADOs').search(item)]
+    files = []
+    for folds in fl:
+
+        try:
+                    
+            files.extend(os.listdir(os.path.join(direct, folds)))
+        except OSError as e:
+            print(f"Error: {e}")
+            continue
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+        
+    return Data_builder(files)
+
+#To be debugged
+
+def sthlp_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    if ty == 'sthlp' or ty == 'hlp':
+        logname = f"{workingroot}/{fn}_sthlp_hlp_securitycheck.txt"
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'help', fn, '\n','log', 'close', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        endtime = datetime.now()
+        rep = pd.DataFrame({'File': [fn],
+                       'Extension': ['sthlp'],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+    if ty == 'ihlp':
+        fullfn2 = fnfull.replace('.ihlp','2.hlp')
+        shutil.copy(fnfull, fullfn2)
+        logname = f"{workingroot}/{fn}_sthlp_ihlp_securitycheck.txt"
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'view', fullfn2, '\n','log', 'close', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        endtime = datetime.now()
+        os.remove(fullfn2)
+        rep = pd.DataFrame({'File': [fn],
+                       'Extension': ['ihlp'],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+    return rep
+
+
+def ado_checker(fn, homedir, ty):
+    #Note, that associated .mos are also checked with the ados
+    starttime = datetime.now()
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    if ty == 'bak':
+        fnfull2 = fnfull.replace('.bak','')
+        shutil.copy(fnfull, fullfn2)
+        fn = fnfull2.replace('.ado', '')
+    logname = f"{workingroot}/{fn}_ado_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', fn, '\n','log', 'close', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+    if ty == 'bak':
+        os.remove(fnfull2)
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['ado'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def do_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    if ty == 'do' or ty == 'DO':
+        starttime = datetime.now()
+        logname = f"{workingroot}/{fn}_do_securitycheck.txt"
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'do', fnfull, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        endtime = datetime.now()
+    
+        rep = pd.DataFrame({'File': [fn],
+                       'Extension': ['do'],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+    if ty == 'def':
+        starttime = datetime.now()
+        logname = f"{workingroot}/{fn}_def_securitycheck.txt"
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'do', fnfull, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        endtime = datetime.now()
+    
+        rep = pd.DataFrame({'File': [fn],
+                       'Extension': ['def'],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+        
+    if ty == 'md' or ty == 'MD':
+        output = fnfull.replace('.md','.do').replace('.MD','.do')
+        def convert_md_to_do(input_md_file, output_do_file):
+            with open(input_md_file, 'r') as md_file:
+                markdown_content = md_file.read()
+            stata_code = []
+            for line in markdown_content:
+                if line.startswith('#'):
+                    stata_code.append('// ' + line.strip('#').strip())
+            with open(output_do_file, 'w') as do_file:
+                do_file.write('\n'.join(stata_code))
+
+        convert_md_to_do(fnfull, output)
+        starttime = datetime.now()
+        logname = f"{workingroot}/{fn}_md_to_do_securitycheck.txt"
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'do', output, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        endtime = datetime.now()
+        os.remove(output)
+        rep = pd.DataFrame({'File': [fn],
+                       'Extension': ['md_do'],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+    if ty == 'txt' or ty == 'TXT':
+        output = fnfull.replace('.txt','.do').replace('.TXT','.do')
+        with open(output, "w") as do_file:
+            do_file.write("import delimited \"" + fnfull + "\"\n")
+        starttime = datetime.now()
+        logname = f"{workingroot}/{fn}_txt_securitycheck.txt"
+
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'use', fnfull, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        logname = f"{workingroot}/{fn}_txt_to_do_securitycheck.txt"
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'do', output, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        endtime = datetime.now()
+        os.remove(output)
+        rep = pd.DataFrame({'File': [fn],
+                       'Extension': ['txt_do'],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+
+    if ty == 'doi' or ty =='DOI':
+        fullfn2 = fnfull.replace('.doi','2.do').repalce('.DOI','2.do')
+        shutil.copy(fnfull, fullfn2)
+        starttime = datetime.now()
+        logname = f"{workingroot}/{fn}_doi_to_do_securitycheck.txt"
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'do', fullfn2, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        endtime = datetime.now()
+        os.remove(fullfn2)
+        rep = pd.DataFrame({'File': [fn],
+                       'Extension': ['doi_do'],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+    if ty == 'sas':
+        starttime = datetime.now()
+        logname = f"{workingroot}/{fn}_sas_securitycheck.txt"
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'do', fnfull, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        endtime = datetime.now()
+        rep = pd.DataFrame({'File': [fn],
+                       'Extension': ['sas'],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+    return rep
+def dlg_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    if ty == 'dlg':
+        starttime = datetime.now()
+        logname = f"{workingroot}/{fn}_dlg_securitycheck.txt"
+    
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'view', fnfull, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        endtime = datetime.now()
+    
+        rep = pd.DataFrame({'File': [fn],
+                       'Extension': ['dlg'],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+    if ty == 'idlg':
+        fullfn2 = fnfull.replace('.idlg','2.dlg')
+        shutil.copy(fnfull, fullfn2)
+        starttime = datetime.now()
+        logname = f"{workingroot}/{fn}_idlg_dlg_securitycheck.txt"
+        commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'view', fullfn2, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+        results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+        time.sleep(1)
+        endtime = datetime.now()
+        os.remove(fullfn2)
+        rep = pd.DataFrame({'File': [fn],
+                       'Extension': ['idlg_dlg'],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+    return rep
+
+def toc_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_toc_securitycheck.txt"
+
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'view', fnfull, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['toc'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def dta_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_dta_securitycheck.txt"
+
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'use', fnfull, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['dta'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def txt_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_txt_securitycheck.txt"
+
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'use', fnfull, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['txt'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def yaml_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    starttime = datetime.now()
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    with open(fnfull, "r") as file:
+        data = yaml.safe_load(file)
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['yaml'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+    
+def csv_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_csv_securitycheck.txt"
+
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'import', 'delimited', fnfull, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['csv'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def mata_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_mata_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'mata:', fnfull, '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['mata'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def matrix_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_matrix_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'matrix', 'use', fnfull, ',', 'clear', '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['matrix'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+def c_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    starttime = datetime.now()
+    commands = ["gcc", fnfull, "-o", fn, '&', 'timeout', '/t', '1', '&', 'taskkill', '/f', '/im', 'cmd.exe']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['c'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+
+def plugin_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_plugin_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'program', fn, 'plugin', '\n','log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['plugin'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def mlib_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_mlib_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'matlab', 'do', fnfull, '\n', 'matlab', f"{fn}(arg1, arg2, {fnfull})", 'log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['mlib'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def scheme_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_scheme_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'set', 'scheme', fnfull, '\n', 'log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['scheme'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def mtx_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_mtx_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'import', 'delimited', fnfull, ',', 'delimiter(" ")', 'clear', '\n', 'import', 'delimited', fnfull, ',', 'delimiter(",")', 'clear', '\n', 'import', 'delimited', fnfull, ',', 'delimiter(";")', 'clear', '\n', 'import', 'delimited', fnfull, ',', 'delimiter("\t")', 'clear', '\n', 'import', 'delimited', fnfull, ',', 'delimiter("|")', 'clear', '\n', 'log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['mtx'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def py_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    starttime = datetime.now()
+    commands = ["python", fnfull]
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': ['py'],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def doc_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    starttime = datetime.now()
+    commands = ["start", fnfull]
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def png_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    starttime = datetime.now()
+
+    try:
+        # Open the PNG file using the default associated application
+        subprocess.Popen([fnfull], shell=True)
+        
+        # Wait for the specified duration (e.g., 1 second)
+        time.sleep(1)
+        
+        # Close the PNG file by killing the associated process
+        subprocess.run(["taskkill", "/f", "/im", "cmd.exe"], shell=True, check=True)
+        
+    except subprocess.CalledProcessError as e:
+        print("Error:", e)
+    
+    endtime = datetime.now()
+    
+    #commands = ["start", "", fnfull, '&', 'timeout', '/t', '1', '&', 'end', '&', 'taskkill', '/f', '/im', 'cmd.exe']
+    #results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE), shell=True)
+    #time.sleep(1)
+    #endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def gitignore_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    starttime = datetime.now()
+    subprocess.call(["type", fnfull], shell=True)
+    time.sleep(1)  # Add a delay if needed
+    subprocess.run(["taskkill", "/f", "/im", "cmd.exe"], shell=True)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def dll_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    
+    starttime = datetime.now()
+    commands = ["dumpbin", "/exports", fnfull, '&', 'timeout', '/t', '1', '&', 'taskkill', '/f', '/im', 'cmd.exe']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE), shell=True)
+    commands = ["objdump", "-x", fnfull, '&', 'timeout', '/t', '1', '&', 'taskkill', '/f', '/im', 'cmd.exe']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def js_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    try:
+        js2py.run_file(fnfull)
+    except js2py.base.JsException as e:
+        error_msg = str(e)
+        if 'ReferenceError: require is not defined' in error_msg:
+            print("Ignoring 'require is not defined' error")
+        else:
+            print("Error:", e)
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def ini_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    with open(fnfull, 'r') as f:
+        contents = f.read()
+        lines = [line.strip() for line in contents.split('\n')]
+        for line in lines:
+            try:
+                exec(line)
+            except Exception as e:
+                print(f"Error executing line: {line}")
+                print(f"Error message: {e}")
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def class_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    fnfull = fnfull.replace('/','\\')
+    print(fnfull)
+    starttime = datetime.now()
+    result = subprocess.run(['java', '-cp', fnfull], capture_output=True, text=True)
+    with open(f"{workingroot}/{fn}_class_securitycheck.txt", 'w') as f:
+        f.write(result.stdout)
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def jar_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    result = subprocess.run(['java', '-jar', fnfull, '&' 'timeout', '/t', '1', '&', 'taskkill','/f', '/im', 'java.exe'], capture_output=True, text=True)
+    with open(f"{workingroot}/{fn}_jar_securitycheck.txt", 'w') as f:
+        f.write(result.stdout)
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def css_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    with open(fnfull, "r") as css_file:
+        # Read and print each line of the CSS file
+        for line in css_file:
+            l = line
+        l = []
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def mpb_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    with open(fnfull, "rb") as mpb_file:
+        for line in mpb_file:
+            l = line.decode("utf-8").strip()
+    l = []
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def mmat_checker(fn, homedr, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_mmat_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'mmat', fnfull, '\n', 'browse', '\n', 'log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def dct_checker(fn, homedr, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_dct_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'dct', fnfull, '\n', 'log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def jl_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    j = julia.Julia()
+    fn = j.include(fnfull)
+    fn
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+def style_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_style_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'style', 'using', fnfull, '\n', 'log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def R_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_r_securitycheck.txt"
+    commands = ['C:/Program Files/R/R-4.4.0/bin/Rscript.R', fnfull]
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def gph_checker(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    starttime = datetime.now()
+    logname = f"{workingroot}/{fn}_gph_securitycheck.txt"
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'graph', 'use', fnfull, '\n', 'graph', 'display', '\n', 'log', 'close', '\n', 'clear', 'all', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    endtime = datetime.now()
+
+    rep = pd.DataFrame({'File': [fn],
+                   'Extension': [ty],
+                   'Process_starts': [starttime],
+                   'Process_ends': [endtime]})
+    return rep
+
+def zipper(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    fnfull = f"{search_file(homedir, fn, ty)}"
+    def extract_zip(zip_file, extract_folder):
+        if not os.path.exists(extract_folder):
+            os.makedirs(extract_folder)
+    
+        with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+            zip_ref.extractall(extract_folder)
+
+    tzip = f"{dirtydir}/tempzip/"
+    extract_zip(fnfull, tzip)
+    zfiles = Get_fileinfo(tzip)
+    return zfiles
+def purifier(fn, homedir, ty):
+    def search_file(homedir, target_file, ty):
+        target_file = f"{target_file}.{ty}"
+        # Iterate over all files and directories in the current directory
+        for root, dirs, files in os.walk(homedir):
+            # Check if the target file exists in the current directory
+            if target_file in files:
+                # If the file is found, return its full path
+                return os.path.join(root, target_file)
+    starttime = datetime.now()
+    os.remove(search_file(homedir, fn, ty)) if search_file(homedir, fn, ty) is not None else None
+    endtime = datetime.now()
+    rep = pd.DataFrame({'File': [fn],
+                       'Extension': [ty],
+                       'Process_starts': [starttime],
+                       'Process_ends': [endtime]})
+    return rep
+
+#### Directors #####
+# Paths
+# Stata catalogue
+dirtydir = "<>" # Where the manually added files are
+cleandir = "<>" # Where the cleaned and checked files will be moved
+homedir = "<>" # Where Stata will install instinctually
+#os.makedirs(f"<>/{datetime.now().strftime('%Y%m%d')}")
+workingroot = f"<>/{datetime.now().strftime('%Y%m%d')}" # Where we will keep a record about all installation and search attempt
+currdir = "C:/Users/<>/Desktop/Syntax_files/Organise_Stata/"
+
+# Create list of files
+files = Get_fileinfo(homedir)
+types = files['Type'].drop_duplicates()
+types = types.tolist()
+
+
+type_to_checker = {
+    'sthlp': sthlp_checker,
+    'hlp': sthlp_checker,
+    'ihlp':sthlp_checker,
+    'ado': ado_checker,
+    'ADO': ado_checker,
+    'do': do_checker,
+    'DO': do_checker,
+    'dta': dta_checker,
+    'exe': purifier,
+    'dlg': dlg_checker,
+    'idlg': dlg_checker,
+    'md': do_checker,
+    'csv': csv_checker,
+    'doi': do_checker,
+    'mata': mata_checker,
+    'bak': ado_checker,
+    'c': c_checker,
+    'plugin': plugin_checker,
+    'py': py_checker,
+    'docx': doc_checker,
+    'doc': doc_checker,
+    'mlib': mlib_checker,
+    'pdf': doc_checker,
+    'dll': dll_checker,
+    'png': png_checker,
+    'gitignore': gitignore_checker,
+    'mtx': mtx_checker,
+    'sas': do_checker,
+    'matrix': matrix_checker,
+    'scheme': scheme_checker,
+    'js': purifier,
+    'def': do_checker,
+    'ini': ini_checker,
+    'class': class_checker,
+    'jel': purifier,
+    'jar': jar_checker,
+    'css': css_checker,
+    'mpp': purifier,
+    'mpb': mpb_checker,
+    'mpd': mpb_checker,
+    'mmat': mmat_checker,
+    'dct': dct_checker,
+    'jl': jl_checker,
+    'style': style_checker,
+    'r': R_checker,
+    'R': R_checker,
+    'ghp': gph_checker,
+    'zip': zipper,
+    'yaml': yaml_checker,
+    'txt': txt_checker,
+    'toc': toc_checker
+}
+
+df_biggerlist = []
+for ty in types:
+    print(ty)
+    if ty == 'mo':
+        continue
+    fl = files[files['Type'] ==  ty]
+    checker_function = type_to_checker.get(ty)
+    df_list = []
+    lengthcounter = 1
+    for onty in fl['ADO'].tolist():
+        print(lengthcounter)
+        if ty == 'zip':
+            subfiles = checker_function(onty, homedir, ty)
+            subtypes = subfiles['Type'].drop_duplicates().tolist()
+            for sty in subtypes:
+                checker_function = type_to_checker.get(sty)
+                if ty == 'mo':
+                    continue
+                subfl == subfiles[subfiles['Type'] == sty]
+                for subfil in subfiles['ADO'].tolist():
+                    if checker_function:
+                        df_list.append(checker_function(onty, homedir, ty))
+        if checker_function:
+            df_list.append(checker_function(onty, homedir, ty))
+        if lengthcounter == 5:
+            break
+        lengthcounter +=1
+    df_biggerlist.append(pd.concat(df_list, ignore_index = True))
+finalres = pd.concat(df_biggerlist, ignore_index = True)
+print(finalres)
+    
