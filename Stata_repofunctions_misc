@@ -1,0 +1,561 @@
+# Functions
+def Get_fileinfo(direct):
+    def Data_builder(files):
+        # Creates a dataframe from all the files, so it can be checked as ados, dos, etc.
+        def Filename_clenser(i):
+            # Takes the filename
+            file_name = i
+            # Looks for the last . in the filename -> after that is the file extension
+            dot_position = file_name.rfind('.')
+
+            # Extracts the extension
+            if dot_position != -1:
+                file_extension = file_name[dot_position+1:]
+                # If the extension is trk or pkg, we do not need data about them
+                if file_extension == 'trk' or file_extension == 'pkg':
+                    return None, None #Return ~Nones
+                # Return the file name and the extension, latter always in lower case
+                return file_name.replace(f".{file_extension}", ''), file_extension.lower()
+            else:
+                # Handle the case where no dot is found in the string
+                print(file_name)
+                return None, None  # Return None
+        df_list = []
+        for i in files:
+            df_list.append(pd.DataFrame([Filename_clenser(i)], columns = ['ADO', 'Type']))
+
+        df=pd.concat(df_list, ignore_index = True)
+        df=df.dropna(how='all')
+        return(df)
+    
+    fl = [item for item in os.listdir(direct) if not re.compile('.trk').search(item) and not re.compile('PDFs').search(item) and not re.compile('Weird_ADOs').search(item)]
+    files = []
+    for folds in fl:
+
+        try:
+                    
+            files.extend(os.listdir(os.path.join(direct, folds)))
+        except OSError as e:
+            print(f"Error: {e}")
+            continue
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+        
+    return Data_builder(files)
+
+def Net_explorer(adoname):
+    def Net_logreader(logname):
+        package_content ='NA'
+        for encodings in ['utf-8', 'latin-1']:
+            try:
+                with open(logname, 'r', encoding = encodings) as text_data:
+                    lines = text_data.readlines()
+                    text_data = ''.join(lines)
+                    package_count_pattern = re.compile(r'\d+ package(s)? found')
+                    describe_pattern = re.compile(r'@net:describe(.*?)(?=@|\Z)', re.DOTALL)
+                    package_count_match = package_count_pattern.search(text_data)
+                    describe_match = describe_pattern.findall(text_data)
+                    package_count = int(package_count_match.group(0).split()[0]) if package_count_match else 0
+                    dc = []
+                    src = []
+                    for describe_code in describe_match:
+                        dc.append(describe_code.split(',')[0].strip() if describe_code else None)
+                        # Regular expression to match the URL inside parentheses
+                        url_pattern = re.compile(r'from\((.*?)\)')
+
+                        # Search for the pattern in the text
+                        match = url_pattern.search(describe_code)
+                        src.append(match.group(1))
+                    package_content_pattern = re.compile(r'package(s)? found \((.*?)\)')
+                    package_content_match = package_content_pattern.search(text_data)
+                    package_content = package_content_match.group(2).strip() if package_content_match else None
+                    if package_content is None:
+                        package_content_pattern = re.compile(r'no matches')
+                        package_content_match = package_content_pattern.search(text_data)
+                        package_content = 'Not found' if package_content_match else None
+                return(package_content, dc, src)
+            except UnicodeDecodeError:
+                continue
+        return(package_content, dc, src)
+    
+    logname = f"{workingroot}/{adoname}_netsearch.txt"
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    if os.path.exists(logname):
+                os.remove(logname)
+                time.sleep(1)
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'net', 'search', adoname, '\n','log', 'close', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    return(Net_logreader(logname))
+
+def Net_installer(adoname2, adofrom, adoname):
+    logname = f"{workingroot}/{adoname}_{adoname2}_netinstalled.txt"
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    if os.path.exists(logname):
+                os.remove(logname)
+                time.sleep(1)
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'net', 'from', adofrom, '\n', 'net', 'install', adoname2, '\n', '\n', 'net', 'get', adoname2, '\n', 'which', adoname, '\n', 'log', 'close', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    return(logname)
+
+# Functions
+def Get_fileinfo(direct):
+    def Data_builder(files):
+        # Creates a dataframe from all the files, so it can be checked as ados, dos, etc.
+        def Filename_clenser(i):
+            # Takes the filename
+            file_name = i
+            # Looks for the last . in the filename -> after that is the file extension
+            dot_position = file_name.rfind('.')
+
+            # Extracts the extension
+            if dot_position != -1:
+                file_extension = file_name[dot_position+1:]
+                # If the extension is trk or pkg, we do not need data about them
+                if file_extension == 'trk' or file_extension == 'pkg':
+                    return None, None #Return ~Nones
+                # Return the file name and the extension, latter always in lower case
+                return file_name.replace(f".{file_extension}", ''), file_extension.lower()
+            else:
+                # Handle the case where no dot is found in the string
+                print(file_name)
+                return None, None  # Return None
+        df_list = []
+        for i in files:
+            df_list.append(pd.DataFrame([Filename_clenser(i)], columns = ['ADO', 'Type']))
+
+        df=pd.concat(df_list, ignore_index = True)
+        df=df.dropna(how='all')
+        return(df)
+    
+    fl = [item for item in os.listdir(direct) if not re.compile('.trk').search(item) and not re.compile('PDFs').search(item) and not re.compile('Weird_ADOs').search(item)]
+    files = []
+    for folds in fl:
+
+        try:
+                    
+            files.extend(os.listdir(os.path.join(direct, folds)))
+        except OSError as e:
+            print(f"Error: {e}")
+            continue
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+        
+    return Data_builder(files)
+
+
+def Data_builder(files):
+    # Creates a dataframe from all the files, so it can be checked as ados, dos, etc.
+    def Filename_clenser(i):
+        # Takes the filename
+        file_name = i
+        # Looks for the last . in the filename -> after that is the file extension
+        dot_position = file_name.rfind('.')
+
+        # Extracts the extension
+        if dot_position != -1:
+            file_extension = file_name[dot_position+1:]
+            # If the extension is trk or pkg, we do not need data about them
+            if file_extension == 'trk' or file_extension == 'pkg':
+                return None, None #Return ~Nones
+            # Return the file name and the extension, latter always in lower case
+            return file_name.replace(f".{file_extension}", ''), file_extension.lower()
+        else:
+            # Handle the case where no dot is found in the string
+            print(file_name)
+            return None, None  # Return None
+    df_list = []
+    for i in files:
+        df_list.append(pd.DataFrame([Filename_clenser(i)], columns = ['ADO', 'Type']))
+
+    df=pd.concat(df_list, ignore_index = True)
+    df=df.dropna(how='all')
+    return(df)
+
+
+
+
+def SSC_explorer(adoname):
+    # Organises the results from the other two embedded functions
+    def SSC_checker(adoname):
+        # Checks the log file created and extracts the adoname, what files are included in said ado and where it can be downloaded from
+        def SSC_describe(adoname):
+            # Checks what we can get from ssc describe about the ADOs by running it in Stata and saving a log file
+            logname = f"{workingroot}/{adoname}.txt"
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            if os.path.exists(logname):
+                        os.remove(logname)
+                        time.sleep(1)
+            commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'ssc', 'describe', adoname, '\n', 'log', 'close', '\n', 'exit']
+            results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+            time.sleep(1)
+            return logname
+        for encodings in ['utf-8', 'latin-1']:
+            try:
+                with open(SSC_describe(adoname), 'r') as file:
+                    lines = file.readlines()
+                    for i, line in enumerate(lines):
+                        if 'not found at SSC' in line:
+                            return False
+                        if 'PACKAGES you could' in line:
+                            return False
+                        if 'from' in line:
+                            url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+                            # Find the URL in the line using re.findall
+                            urls = re.findall(url_pattern, line)
+                            if len(urls) > 0:
+                                URLS = urls
+                        if 'INSTALLATION FILES' in line:
+                            fls = list()
+                            k=1
+                            while '{smcl}' not in lines[i+k]:
+                                fls.append(lines[i+k])
+                                k =k+1
+                            fls_cl=list()
+                            for fl in fls:
+                                if '.ado\n' in fl:
+                                    fls_cl.append(fl.replace('.ado\n', '').replace(' ',''))
+                            return adoname, fls_cl, URLS
+            except UnicodeDecodeError:
+                continue
+        return False
+
+    if SSC_checker(adoname) is not False:
+        an, mas, url = SSC_checker(adoname)
+        res1 = pd.DataFrame(mas, columns = ['ADO'])
+        res1['Source_ADO'] = an
+        res1['URL'] = url*len(res1)
+        return(res1)
+
+def parallel_SSC_explorer(adoname):
+    # To make the previous function into a parallel loop
+    print(adoname)
+    newdf = SSC_explorer(adoname)
+    return newdf if newdf is not None else pd.DataFrame()
+
+def SSC_Installer(adoname):
+    logname = f"{workingroot}/{adoname}_install.txt"
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    if os.path.exists(logname):
+                os.remove(logname)
+                time.sleep(1)
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'ssc', 'install', adoname, '\n', 'which', adoname, '\n', 'log', 'close', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    return(logname)
+
+def Net_explorer(adoname):
+    def Net_logreader(logname):
+        package_content ='NA'
+        for encodings in ['utf-8', 'latin-1']:
+            try:
+                with open(logname, 'r', encoding = encodings) as text_data:
+                    lines = text_data.readlines()
+                    text_data = ''.join(lines)
+                    package_count_pattern = re.compile(r'\d+ package(s)? found')
+                    describe_pattern = re.compile(r'@net:describe(.*?)(?=@|\Z)', re.DOTALL)
+                    package_count_match = package_count_pattern.search(text_data)
+                    describe_match = describe_pattern.findall(text_data)
+                    package_count = int(package_count_match.group(0).split()[0]) if package_count_match else 0
+                    dc = []
+                    src = []
+                    for describe_code in describe_match:
+                        dc.append(describe_code.split(',')[0].strip() if describe_code else None)
+                        # Regular expression to match the URL inside parentheses
+                        url_pattern = re.compile(r'from\((.*?)\)')
+
+                        # Search for the pattern in the text
+                        match = url_pattern.search(describe_code)
+                        src.append(match.group(1))
+                    package_content_pattern = re.compile(r'package(s)? found \((.*?)\)')
+                    package_content_match = package_content_pattern.search(text_data)
+                    package_content = package_content_match.group(2).strip() if package_content_match else None
+                    if package_content is None:
+                        package_content_pattern = re.compile(r'no matches')
+                        package_content_match = package_content_pattern.search(text_data)
+                        package_content = 'Not found' if package_content_match else None
+                return(package_content, dc, src)
+            except UnicodeDecodeError:
+                continue
+        return(package_content, dc, src)
+    
+    logname = f"{workingroot}/{adoname}_netsearch.txt"
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    if os.path.exists(logname):
+                os.remove(logname)
+                time.sleep(1)
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'net', 'search', adoname, '\n','log', 'close', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    return(Net_logreader(logname))
+
+def Net_describer(adoname2, adofrom, adoname):
+    def Net_describechecker(logname):
+        for encodings in ['utf-8', 'latin-1', 'ascii']:
+            try:
+                with open(logname, 'r', encoding = encodings) as file:
+                    lines = file.readlines()
+                    filesithas = list()
+                    for i, line in enumerate(lines):
+
+                        if 'log close' in line:
+                            break
+                        if 'INSTALLATION FILES' in line:
+                            k = 1
+                            while k+i < len(lines) and 'net get' not in lines[i+k]:
+                                if 'log close' in lines[i+k]:
+                                    break
+                                if f"{adoname2}/" in lines[i+k]:
+                                    filesithas.append(lines[i+k].replace(f"{adoname2}/", '').replace('\n', '').replace('      ', ''))
+                                else:
+                                    if lines[i+k] == '' or '{.-}' in lines[i+k] or '{smcl}' in lines[i+k]:
+                                        break
+                                    filesithas.append(lines[i+k].replace('\n', '').replace('      ', ''))
+                                k +=1
+                        if 'ANCILLARY FILES' in line:
+                            k = 1
+                            while k+i < len(lines) and 'log close' not in lines[i+k]:
+                                if f"{adoname2}/" in lines[i+k]:
+                                    filesithas.append(lines[i+k].replace(f"{adoname2}/", '').replace('\n', '').replace('      ', ''))
+                                else:
+                                    if lines[i+k] == '' or '{.-}' in lines[i+k] or '{smcl}' in lines[i+k]:
+                                        break
+                                filesithas.append(lines[i+k].replace('\n', '').replace('      ', ''))
+                                k +=1
+                    if filesithas == []:
+                        filesithas = ['NA.NA']
+            except UnicodeDecodeError:
+                continue
+                
+        return filesithas
+    
+    logname = f"{workingroot}/{adoname}_{adoname2}_netdescribed.txt"
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    if os.path.exists(logname):
+                os.remove(logname)
+                time.sleep(1)
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'net', 'from', adofrom, '\n', 'net', 'describe', adoname2, '\n', 'log', 'close', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    return(Net_describechecker(logname))
+
+def Net_installer(adoname2, adofrom, adoname):
+    logname = f"{workingroot}/{adoname}_{adoname2}_netinstalled.txt"
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    if os.path.exists(logname):
+                os.remove(logname)
+                time.sleep(1)
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'net', 'from', adofrom, '\n', 'net', 'install', adoname2, '\n', '\n', 'net', 'get', adoname2, '\n', 'which', adoname, '\n', 'log', 'close', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    return(logname)
+
+def Net_installer2(adoname, url):
+    logname = f"{workingroot}/{adoname}_netinstalled.txt"
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    if os.path.exists(logname):
+                os.remove(logname)
+                time.sleep(1)
+    commands = ['C:\Program Files\Stata18\StataMP-64.exe', 'log', 'using', logname, '\n', 'net', 'from', adofrom, '\n', 'net', 'install', adoname, '\n', 'net', 'get', adoname, '\n', 'log', 'close', '\n', 'exit']
+    results = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text = True, check = True, startupinfo=subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE))
+    time.sleep(1)
+    return(logname)
+
+def Net_install_checker(lgn, adoname):
+    package_info = []
+    with open(lgn, 'r') as file:
+        lines = file.readlines()
+        for i, line in enumerate(lines):
+            if 'not found as either built-in or ado-file' in line:
+                return False
+            
+            if f'which {adoname}' in line:
+                if '*! version'.lower() in line.lower():
+                    return line.replace('*! version', '').replace('{res}', '')
+                second_line = ''
+                x=1
+                while '{com}.  log close ' not in lines[i+x] and lines[i+x] != '{txt}{sf}{ul off}':
+                    second_line = second_line + lines[i + x].strip()
+                    if '*! version'.lower() in second_line.lower():
+                        break
+                    x +=1
+                if '*! version'.lower() in second_line.lower():
+                    package_info = line.replace('*! version', '').replace('{res}', '')
+
+                    version_match = re.search(r'\d+\.\d+\.\d+', second_line)
+                    version_number = version_match.group() if version_match else None
+
+                    version_match2 = re.search(r'\d+\.\d+', second_line)
+                    version_number2 = version_match2.group() if version_match2 else None
+
+                    # If a version number exists, use it; otherwise, use the whole line
+                    package_info = version_number if version_number else second_line
+                    if package_info == second_line:
+                        package_info = version_number2 if version_number2 else second_line
+
+                if package_info == 'NA' or second_line:
+                    version_match = re.search(r'\d+\.\d+\.\d+', second_line)
+                    version_number = version_match.group() if version_match else None
+
+                    version_match2 = re.search(r'\d+\.\d+', second_line)
+                    version_number2 = version_match2.group() if version_match2 else None
+
+                    # If a version number exists, use it; otherwise, use the whole line
+                    package_info = version_number if version_number else second_line
+                    if package_info == second_line:
+                        package_info = version_number2 if version_number2 else second_line
+                    if package_info == second_line:
+                        date_match1 = re.search(r'(\d{2}[\/-]?\w{3}[\/-]?\d{4})', second_line)
+                        date_match2 = re.search(r'(\d{2}[\/-]\d{2}[\/-]\d{4})', second_line)
+                        date_match3 = re.search(r'(\w{3}\d{4})', second_line)
+                        date_match4 = re.search(r'(\d{2}[\/-]\w{3}[\/-]\d{4}|\d{2}\w{3}\d{4})', second_line)
+                        date_match5 = re.search(r'(\d{2}[\/-]\d{2}[\/-]\d{2})', second_line)
+                        date_match6 = re.search(r'(\d{2}[\/-]\d{2}[\/-]\d{2})', second_line)
+                        date_match7 = re.search(r'\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?\s*\d{4})\b', second_line, flags=re.IGNORECASE)
+                        date_match8 = re.search(r'\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?\s*\d{1,2}(?:,?\s9\d{4})?)\b', second_line, flags=re.IGNORECASE)
+
+                        date = date_match1.group() if date_match1 else None
+                        if date is None:
+                            date = date_match2.group() if date_match2 else None
+                        if date is None:
+                            date = date_match3.group() if date_match3 else None
+                        if date is None:
+                            date = date_match4.group() if date_match4 else None
+                        if date is None:
+                            date = date_match5.group() if date_match5 else None
+                        if date is None:
+                            date = date_match6.group() if date_match5 else None
+                        if date is None:
+                            date = date_match7.group() if date_match5 else None
+                        if date is None:
+                            date = date_match8.group() if date_match5 else None
+                        if date is not None:
+                            date = date.replace('{res}*! ', '')
+
+                        if date is not None:
+                            package_info = date
+                        if date is None:
+                            package_info = 'NA'
+                if package_info == '' or package_info == '{txt}{search r(111), local:r(111);}':
+                    package_info = 'NA'
+                if package_info == '' or package_info == '{txt}{search r(610), local:r(610);}':
+                    package_info = 'NA'
+                if package_info == second_line:
+                    package_info = 'NA'
+        return package_info
+    
+
+def download_stata_file(url, file_name, aimedhomedir):
+    #In some cases net install will not download all files listed by net describe for one reason or another
+    #As such, we will download the missing ados and other files "manually with this function"
+    try:
+        # Send a GET request to the URL
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an HTTPError for bad responses
+
+        # Open the file in binary write mode and write the contents
+        with open(f"{aimedhomedir}/{file_name}", 'wb') as file:
+            file.write(response.content)
+    except requests.HTTPError as http_err:
+        print(f"HTTP error occurred: {http_err}")
+    except Exception as err:
+        print(f"An error occurred: {err}")
+        
+def NonSSC_Builder(an, url, adoname):
+    def missedchecker(netdesc,wehavelist):
+        misseddownload = [elem for elem in netdesc if elem not in wehavelist.values]
+        pattern = f"{an}/"
+        seen = set()
+        misseddownload = [
+            re.sub(pattern, '', string)  # Replace the pattern with an empty string
+            for string in misseddownload
+            if (
+                re.sub(pattern, '', string) != ''  # Filter out results that are not empty after replacement
+                and re.sub(pattern, '', string) not in seen  # Deduplication check
+                and not seen.add(re.sub(pattern, '', string))  # Add to seen set as side-effect
+            )
+        ]
+        return misseddownload
+    netdesc = Net_describer(an, url, adoname)
+    checker = pd.merge(Data_builder(netdesc), df, on = ['ADO', 'Type'], how='inner')
+
+    if not checker.empty:
+        lgn = Net_installer(an, url, adoname)
+        print(lgn)
+        ver = Net_install_checker(lgn, adoname)
+
+    dt_has = Get_fileinfo(homedir)
+    wehavelist = dt_has['ADO']+'.'+dt_has['Type']
+    misseddownload = missedchecker(netdesc,wehavelist)
+
+    if len(misseddownload) > 0:
+        for chrun in misseddownload:
+            chrun = chrun.replace('./', '',).replace('/.','').replace('..', '').replace('.//.', '')
+            chrun = chrun.replace('.//.', '')
+            # Example string
+            example_string = chrun
+            
+            # Split the string based on the last '/'
+            parts = example_string.rsplit('/', 1)
+            
+            # Extract the part after the last '/'
+            if len(parts) > 1:
+                chrun = parts[-1]
+            else:
+                # If there is no '/' in the string, consider the whole string
+                chrun = parts[0]
+
+            for slc in range(0,3):
+                if chrun[slc] == '.':
+                    continue
+                if chrun[slc] == '/':
+                    continue
+                else:
+                    sl = chrun[slc]
+            source_path = f"{currdir}/{chrun}"
+            source_path = source_path.replace('./', '',).replace('/.','').replace('..', '').replace('.//.', '')
+            if os.path.exists(source_path):
+
+                try:
+                    
+                    destination_path = f"{homedir}/{sl}/"
+                    destination_path = destination_path.replace('./', '',).replace('/.','').replace('..', '').replace('.//.', '')
+                    shutil.move(source_path, destination_path)
+                except shutil.Error as e:
+                    print(f"Error: {e}")
+                    continue
+                except Exception as e:
+                    print(f"Unexpected error: {e}")
+                    # Handle other unexpected errors here
+            else:
+                aimedhomedir = f"{homedir}/{sl}/"
+                url = f"{wherefrom[runner]}/{chrun}"
+                download_stata_file(wherefrom[runner], chrun, aimedhomedir)
+
+    dt_has = Get_fileinfo(homedir)
+    wehavelist = dt_has['ADO']+'.'+dt_has['Type']
+    misseddownload = missedchecker(netdesc,wehavelist)
+    lgn = "NA"
+    ver = "NA"
+    if len(misseddownload)>0:
+        print(f"Issues with {misseddownload}")
+        lgn = "NA"
+        ver = "NA"
+    return lgn, ver
